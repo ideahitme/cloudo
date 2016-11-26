@@ -1,0 +1,44 @@
+Skip to content
+This repository
+Search
+Pull requests
+Issues
+Gist
+ @ideahitme
+ Watch 0
+  Star 0
+ Fork 0 ideahitme/cloudtools
+ Code  Issues 0  Pull requests 0  Projects 0  Wiki  Pulse  Graphs  Settings
+Branch: master Find file Copy pathcloudtools/.gitignore
+ec7cb5e  10 days ago
+@ideahitme ideahitme fix the fuck up with go deps
+1 contributor
+RawBlameHistory     
+26 lines (20 sloc)  276 Bytes
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+
+# Folders
+_obj
+_test
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+
+_testmain.go
+
+*.exe
+*.test
+*.prof
+shortcuts
+Contact GitHub API Training Shop Blog About
+© 2016 GitHub, Inc. Terms Privacy Security Status Help
