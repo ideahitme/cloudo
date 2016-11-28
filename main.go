@@ -3,20 +3,17 @@ package main
 import (
 	"os"
 
+	"github.com/ideahitme/cloudo/awsclient"
+
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-var (
-	app     = kingpin.New("cloudo", "Cloud fast provisioning scripts")
-	verbose = app.Flag("v", "verbose mode").Bool()
-
-	aws    = app.Command("aws", "AWS API")
-	create = aws.Command("create", "provisions AWS EC2 instances with new VPC/Subnet/IG/Security Group with enabled ssh connection")
-)
-
 func main() {
-	switch v, _ := app.Parse(os.Args[1:]); v {
-	case "aws create":
+	var debug bool
+	app := kingpin.New("cloudo", "Cloud fast provisioning script")
+	app.Flag("debug", "debug mode").BoolVar(&debug)
 
-	}
+	awsclient.ReadFlags(app)
+
+	kingpin.MustParse(app.Parse(os.Args[1:]))
 }
