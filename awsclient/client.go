@@ -2,6 +2,7 @@ package awsclient
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
@@ -17,6 +18,8 @@ type AWSClient struct {
 	vpcID    *string
 	subnetID *string
 	igID     *string //internet gateway
+	rtID     *string //route table id
+	sgID     *string //security group id
 }
 
 type options struct {
@@ -68,7 +71,6 @@ func (client *AWSClient) Create() error {
 	}
 
 	ec2Client := ec2.New(sess)
-
 	if err = client.createVPC(ec2Client); err != nil {
 		return err
 	}
@@ -76,6 +78,12 @@ func (client *AWSClient) Create() error {
 		return err
 	}
 	if err = client.createInternetGateway(ec2Client); err != nil {
+		return err
+	}
+	if err = client.createRouteTable(ec2Client); err != nil {
+		return err
+	}
+	if err = client.createSecurityGroup(ec2Client); err != nil {
 		return err
 	}
 	return nil
@@ -179,7 +187,75 @@ func (client *AWSClient) createInternetGateway(ec2Client *ec2.EC2) error {
 		return err
 	}
 	logrus.Infof("Tagging IG %s with creator=%s tag", *client.subnetID, name)
-	client.tagResource(client.igID, ec2Client)
+	if err := client.tagResource(client.igID, ec2Client); err != nil {
+		return err
+	}
+	logrus.Infoln("Internet gateway successfully created")
+	return nil
+}
+
+func (client *AWSClient) createRouteTable(ec2Client *ec2.EC2) error {
+	logrus.Infoln("Creating a route table for the vpc")
+	rtInput := &ec2.CreateRouteTableInput{
+		VpcId: client.vpcID,
+	}
+	output, err := ec2Client.CreateRouteTable(rtInput)
+	if err != nil {
+		return err
+	}
+	client.rtID = output.RouteTable.RouteTableId
+
+	logrus.Infof("Route table (%s) is created. Associating to Subnet %s", *client.rtID, *client.subnetID)
+	assocInput := &ec2.AssociateRouteTableInput{
+		SubnetId:     client.subnetID,
+		RouteTableId: client.rtID,
+	}
+	if _, err := ec2Client.AssociateRouteTable(assocInput); err != nil {
+		return nil
+	}
+	logrus.Infof("Tagging Route table %s with creator=%s tag", *client.rtID, name)
+	if err := client.tagResource(client.rtID, ec2Client); err != nil {
+		return err
+	}
+	logrus.Infoln("Route table successfully created")
+
+	logrus.Infof("Creating a route to Internet Gateway (%s)", *client.igID)
+	createRouteInput := &ec2.CreateRouteInput{
+		DestinationCidrBlock: aws.String("0.0.0.0/0"),
+		GatewayId:            client.igID,
+		RouteTableId:         client.rtID,
+	}
+	if _, err := ec2Client.CreateRoute(createRouteInput); err != nil {
+		return err
+	}
+	logrus.Infoln("Route table is configured")
+	return nil
+}
+
+func (client *AWSClient) createSecurityGroup(ec2Client *ec2.EC2) error {
+	logrus.Infof("Creating a security group for the vpc (%s)", *client.vpcID)
+	sgInput := &ec2.CreateSecurityGroupInput{
+		VpcId:       client.vpcID,
+		GroupName:   aws.String(name),
+		Description: aws.String(fmt.Sprintf("%s created security group", name)),
+	}
+	output, err := ec2Client.CreateSecurityGroup(sgInput)
+	if err != nil {
+		return err
+	}
+	client.sgID = output.GroupId
+
+	logrus.Infof("Tagging Security group %s with creator=%s tag", *client.sgID, name)
+	if err := client.tagResource(client.sgID, ec2Client); err != nil {
+		return err
+	}
+
+	logrus.Infoln("Adding Ingress rules")
+	if err := client.authorizeIngress(ec2Client); err != nil {
+		return err
+	}
+
+	logrus.Infoln("Security group is configured")
 	return nil
 }
 
@@ -219,4 +295,43 @@ func (client *AWSClient) tagResource(resourceID *string, ec2Client *ec2.EC2) err
 	}
 	_, err := ec2Client.CreateTags(tagInput)
 	return err
+}
+
+func (client *AWSClient) authorizeIngress(ec2Client *ec2.EC2) error {
+	logrus.Infof("Enabling all Inbound connection on all protocols coming from CIDR: %s", client.opt.vpcCIDR)
+	logrus.Infoln("Enabling port 22 TCP connection from all sources (SSH access)")
+	inputs := []*ec2.AuthorizeSecurityGroupIngressInput{
+		&ec2.AuthorizeSecurityGroupIngressInput{
+			GroupId:    client.sgID,
+			IpProtocol: aws.String("-1"),
+			CidrIp:     aws.String(client.opt.vpcCIDR),
+			FromPort:   aws.Int64(0),
+			ToPort:     aws.Int64(65535),
+		},
+		&ec2.AuthorizeSecurityGroupIngressInput{
+			GroupId:    client.sgID,
+			IpProtocol: aws.String("tcp"),
+			CidrIp:     aws.String("0.0.0.0/0"),
+			FromPort:   aws.Int64(22),
+			ToPort:     aws.Int64(22),
+		},
+	}
+	errChannel := make(chan error)
+	for _, input := range inputs {
+		input := input
+		go func() {
+			if _, err := ec2Client.AuthorizeSecurityGroupIngress(input); err != nil {
+				errChannel <- err
+			} else {
+				errChannel <- nil
+			}
+		}()
+	}
+
+	for _ = range inputs {
+		if err := <-errChannel; err != nil {
+			return err
+		}
+	}
+	return nil
 }
